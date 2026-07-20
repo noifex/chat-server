@@ -1,0 +1,23 @@
+# === runtime state（実行時に生成される。ソースではない）===
+.runtime/
+*.inbox
+*.cursor
+*.notify
+*.outbox
+*.log
+*.wal
+pids
+clients/turn
+
+# === agent workspace（独立した runtime git / saga サンドボックス）===
+# Step14 設計: agent の成果物を隔離する独立 repo。実行時に生成される
+workspace/
+
+# === local permission grants（machine 固有・絶対パスを含みうる）===
+# 代わりに settings.example.json を参照（README 参照）
+**/.claude/settings.local.json
+
+# === python / macOS ===
+__pycache__/
+*.pyc
+.DS_Store

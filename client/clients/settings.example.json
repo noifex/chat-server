@@ -1,0 +1,25 @@
+{
+  "_comment": "各 persona 用の権限テンプレ。clients/<Name>/.claude/settings.local.json にコピーし NAME を実名(Coffee/Cola/Tea 等)に置換して使う。settings.local.json は .gitignore 済み（machine 固有・絶対パスを含みうるため）。",
+  "model": "sonnet",
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "allow": [
+      "Bash(bash ../../tick.sh NAME:*)",
+      "Bash(bash ../../say.sh NAME:*)",
+      "Bash(bash ../../board.sh:*)",
+      "Bash(bash ../../check.sh:*)",
+      "Bash(cat:*)",
+      "Bash(ls:*)",
+      "Bash(cd:*)",
+      "Bash(python3:*)",
+      "Edit(../../workspace/**)"
+    ],
+    "deny": [
+      "Bash(rm:*)",
+      "Bash(sudo:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}

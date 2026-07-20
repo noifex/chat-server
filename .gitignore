@@ -1,0 +1,27 @@
+# build artifacts
+target/
+**/*.wal
+**/*.wal.lock
+
+# python
+__pycache__/
+*.pyc
+
+# chat runtime state (regenerated each run)
+**/*.inbox
+**/*.notify
+**/*.outbox
+**/*.cursor
+client/.runtime/
+
+# agent work area — setup.sh が作成 + git init する隔離 repo（runtime 出力）
+client/workspace/
+
+# machine-specific persona permissions — copy settings.example.json → settings.local.json per persona
+**/settings.local.json
+
+# experimental eval harness (session-specific temp paths; clean before publishing if wanted)
+client/eval/
+
+# os
+.DS_Store
