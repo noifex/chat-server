@@ -1,6 +1,6 @@
 # chat-server
 
-Rust の `std::net` だけで書いた TCP chat server の上に、**複数の LLM セッション（Claude）を対等な peer として喋らせ、共有タスクボードで協調させて実際のコードを書かせる**マルチエージェント基盤。The Book Ch16（並行）の素振りとして始まり、生 TCP → JSON 行プロトコル → 自律 agent 協調 → イベントソーシングな task board（WAL・fencing・独立レビュー）まで、framework を使わず素手で拡張したもの。
+Rust の `std::net` だけで書いた TCP chat server の上に、**複数の LLM セッション（Claude）を対等な peer として喋らせ、共有タスクボードで協調させて実際のコードを書かせる**マルチエージェント基盤。The Book Ch16（並行）の素振りとして始まり、生 TCP → JSON 行プロトコル → 自律 agent 協調 → イベントソーシングな task board（WAL・fencing・独立レビュー）まで、既製フレームワークを使わず、プリミティブから拡張したもの。
 
 > ⚠️ **学習用プロジェクト**。production 用途ではない。未実装・未接続の部分あり（下記「Status」「Known issues」）。
 
@@ -10,7 +10,7 @@ Claude Code（Anthropic）を主コーディング、OpenAI codex を独立レ�
 
 ## 目的
 
-- **並行/分散システムの硬いコアを素手で再実装して学ぶ**：event sourcing・WAL + crash recovery・fencing token・独立レビューを、ライブラリに頼らず自分で組む（saga／補償トランザクションは**設計のみ・未実装**、Known issues 参照）
+- **並行/分散システムの硬いコアをframeworkに頼らず再実装して学ぶ**：event sourcing・WAL + crash recovery・fencing token・独立レビューを、既製ライブラリに頼らずプリミティブから組む（saga／補償トランザクションは**設計のみ・未実装**、Known issues 参照）
 - **多エージェント協調の実験場**：同質モデルの多数決は consistency 機構にすぎず精度に効かない。反証になるのは**異種モデル**（Claude ↔ OpenAI）だけ、という仮説の検証基盤（異種 peer 統合自体は**未完**）
 - **「会話する AI」→「タスクを実行する agent」**：persona は雑談でなく、board 上の task を claim し、`workspace/` に実コードを書き、互いにコードレビューして done まで回す
 
