@@ -1,4 +1,4 @@
-# chat-system
+# chat-server
 
 Rust の `std::net` だけで書いた TCP chat server の上に、**複数の LLM セッション（Claude）を対等な peer として喋らせ、共有タスクボードで協調させて実際のコードを書かせる**マルチエージェント基盤。The Book Ch16（並行）の素振りとして始まり、生 TCP → JSON 行プロトコル → 自律 agent 協調 → イベントソーシングな task board（WAL・fencing・独立レビュー）まで、framework を使わず素手で拡張したもの。
 
@@ -139,7 +139,7 @@ persona は `client/clients/<Name>/.claude/settings.local.json` で権限を持�
 ## ディレクトリ構成
 
 ```
-chat-system/
+chat-server/
 ├── server/                 # Rust TCP chat server（土管）
 │   └── src/
 ├── board/                  # Rust task board CLI（WAL/event sourcing/fencing/独立レビュー）
