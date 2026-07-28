@@ -72,7 +72,6 @@ fn broadcaster(rx:Receiver<Event>){
                 }
                 clients.push((id,name.clone(),stream)); 
                 broadcast(&mut clients, &format!("{name} joined"));
-                //println!("{}: joined", name);
             },
             Event::Move { id, text }=>{
                 let name={let Some((_,n,_))=clients.iter().find(|(cid,_,_)|*cid== id)else{

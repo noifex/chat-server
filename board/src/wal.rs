@@ -3,7 +3,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
-use crate::events::{Event, Kind, Task};
+use crate::events::{Event, Task};
 use crate::reducer;
 
 #[derive(Debug)]
@@ -146,6 +146,11 @@ impl Locked<'_> {
             self.wal.poisoned = true;
             return AppendOutcome::InDoubt(e);
         }
+        //pause-hook for kill -9 test
+
+        if std::env::var("BOARD_PAUSE_AFTER_WRITE").is_ok(){
+            loop{std::thread::sleep(std::time::Duration::from_secs(1));}
+        }
         if let Err(e) = file.sync_all() {
             self.wal.poisoned = true;
             return AppendOutcome::InDoubt(e);
@@ -155,4 +160,129 @@ impl Locked<'_> {
 
     //pub fn contains(&self, task_id:u64,kind:Kind,fencing:Option<u64>)->bool{
     //}
+}
+
+#[cfg(test)]
+mod tests{
+    use std::{env::temp_dir, sync::atomic::{AtomicU64, Ordering}, process};
+
+use super::*;
+    use crate::{events::{Event,Kind}};
+
+    fn tmp_wal()-> PathBuf{
+        static COUNTER:AtomicU64=AtomicU64::new(0);
+        let n =COUNTER.fetch_add(1, Ordering::Relaxed);
+        let pid=process::id();
+        let name=format!("board_test_{pid}_{n}.wal");
+        temp_dir().join(name)
+
+    }
+
+    fn good_line(seq:u64,kind:Kind,task_id:u64 )->String{
+        let ev=Event::new(seq, kind, task_id, "tester".to_string());
+        let mut s=serde_json::to_string(&ev).unwrap();
+        s.push('\n');
+        s // this is ok 
+    }
+    fn write_wal(line:&[&str])->PathBuf{
+        let path=tmp_wal();
+        let contents=line.concat();
+        std::fs::write(&path, &contents).unwrap();
+        path
+    }
+struct TempWal { path: PathBuf }
+impl Drop for TempWal {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_file(self.path.with_added_extension("lock"));
+    }
+  }
+
+  
+#[test]
+fn torn_tail_recovers(){
+    
+    let torn=serde_json::to_string(&Event::new(3,Kind::TaskAdded,3,"tester".to_string())).unwrap();
+    let path=write_wal(&[
+        &good_line(1, Kind::TaskAdded, 1),
+        &good_line(2, Kind::TaskAdded, 2),
+        &torn,
+    ]);
+    let _tmp=TempWal{path:path.clone()};
+    let mut wal=Wal::open(path.clone());
+    let rec=wal.with_exclusive(|w| w.recover()).unwrap();
+    match rec {
+        Recover::TruncatedTail { dropped_bytes }=>{
+            assert_eq!(dropped_bytes,torn.len() as u64);
+        }
+        _=> panic!("expected TruncatedTail"),
+    }
+    let (map,max_seq)=wal.with_exclusive(|w| w.load()).unwrap().unwrap();
+    assert_eq!(max_seq,2);
+    assert_eq!(map.len(),2);
+    }
+#[test]
+fn clean_wal_loads_all(){
+    let path=write_wal(&[
+        &good_line(1, Kind::TaskAdded, 1),
+        &good_line(2, Kind::TaskAdded, 2),
+        &good_line(3, Kind::TaskAdded, 3),
+
+    ]);
+    let _tmp=TempWal{path:path.clone()};
+    let mut wal=Wal::open(path.clone());
+    let rec=wal.with_exclusive(|w| w.recover()).unwrap();
+    assert!(matches!(rec,Recover::Clean));
+    let (map,max_seq)=wal.with_exclusive(|w| w.load()).unwrap().unwrap();
+    assert_eq!(max_seq,3);
+    assert_eq!(map.len(),3);
+}
+#[test]
+fn mid_corrupt_is_poison(){
+    let path=write_wal(&[
+        &good_line(1, Kind::TaskAdded, 1),
+        "this is not json\n",
+        &good_line(3, Kind::TaskAdded, 3),
+    ]);
+    let _tmp=TempWal{path:path.clone()};
+    let mut wal=Wal::open(path.clone());
+    let rec=wal.with_exclusive(|w| w.recover()).unwrap();
+    assert!(matches!(rec,Recover::Poison(_)));
+    match rec{
+        Recover::Poison(p)=>{
+            assert!(p.reason.contains("corrupt"));
+        }
+        _=>panic!("expected Poison"),// can delete this line because line 245 is checking same thing
+    }
+}
+#[test]
+fn seq_gap(){
+    let path=write_wal(&[
+        &good_line(1, Kind::TaskAdded, 1),
+        &good_line(2, Kind::TaskAdded, 2),
+        &good_line(4, Kind::TaskAdded, 4),
+    ]);
+    let _tmp=TempWal{path:path.clone()};
+    let mut wal=Wal::open(path.clone());
+    let rec=wal.with_exclusive(|w| w.recover()).unwrap();
+    assert!(matches!(rec,Recover::Clean));
+
+    let result =wal.with_exclusive(|w| w.load()).unwrap();
+    assert!(result.is_err());
+}
+#[test]
+fn seq_dup(){
+        let path=write_wal(&[
+        &good_line(1, Kind::TaskAdded, 1),
+        &good_line(2, Kind::TaskAdded, 2),
+        &good_line(2, Kind::TaskAdded, 2),
+    ]);
+    let _tmp=TempWal{path:path.clone()};
+    let mut wal=Wal::open(path.clone());
+    let rec=wal.with_exclusive(|w| w.recover()).unwrap();
+    assert!(matches!(rec,Recover::Clean));
+
+    let result =wal.with_exclusive(|w| w.load()).unwrap();
+    assert!(result.is_err());
+}
 }
