@@ -9,11 +9,11 @@ fn now_ms() -> u64 {
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum Kind { TaskAdded, Claimed, Reclaimed, Working, Review, Approve, ChangesRequested }
+pub enum Kind { TaskAdded, Claimed, Reclaimed, Working, Review, Approve, ChangesRequested, Compensate, RolledBack, NeedsHuman }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "snake_case")]
-pub enum State { Proposed, Claimed, Working, Review, Done }
+pub enum State { Proposed, Claimed, Working, Review, Done, Compensating, RolledBack, NeedsHuman }
 
 #[derive(Serialize, Deserialize, PartialEq)]
 pub struct Event {
@@ -26,6 +26,8 @@ pub struct Event {
     pub fencing_token: Option<u64>,
     pub expected_state: Option<State>,
     pub desc: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_sha: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -36,6 +38,7 @@ pub struct Task {
     pub owner: Option<String>,
     pub active_fencing_token: Option<u64>,
     pub claimed_at: Option<u64>,
+    pub commit_sha: Option<String>,
 }
 
 impl Event {
@@ -50,6 +53,7 @@ impl Event {
             fencing_token: None,
             expected_state: None,
             desc: None,
+            commit_sha:None,
         }
     }
 
@@ -65,6 +69,10 @@ impl Event {
 
     pub fn desc(mut self, d: String) -> Self {
         self.desc = Some(d);
+        self
+    }
+    pub fn with_commit_sha(mut self, sha: String) -> Self {
+        self.commit_sha = Some(sha);
         self
     }
 }

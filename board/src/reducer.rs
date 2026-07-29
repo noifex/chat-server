@@ -18,6 +18,7 @@ pub fn apply(map: &mut BTreeMap<u64, Task>, ev: &Event) -> Result<(), Poison> {
                 owner: None,
                 active_fencing_token: None,
                 claimed_at: None,
+                commit_sha:None,
             });
             Ok(())
         }
@@ -52,6 +53,8 @@ pub fn apply(map: &mut BTreeMap<u64, Task>, ev: &Event) -> Result<(), Poison> {
         // transition: state 一致 AND 持ってる整理券が現役と完全一致した時だけ進む。
         Kind::Working => advance(map, ev, State::Claimed, State::Working),
         Kind::Review  => advance(map, ev, State::Working, State::Review),
+        Kind::RolledBack=>advance(map, ev, State::Compensating, State::RolledBack),
+        Kind::NeedsHuman=> advance(map, ev, State::Compensating, State::NeedsHuman),
 
         // 独立レビュー: owner 以外だけが Review を裁ける。fencing は照合しない(reviewer は owner の整理券を持たない)。
         Kind::Approve => {
@@ -62,9 +65,25 @@ pub fn apply(map: &mut BTreeMap<u64, Task>, ev: &Event) -> Result<(), Poison> {
             match &task.owner {
                 Some(o) if o != &ev.by => {
                     task.state = State::Done;
+                    task.commit_sha=ev.commit_sha.clone();
                     Ok(())
                 }
                 _ => Err(bad(format!("task {} cannot be approved by owner or unowned", ev.task_id))),
+            }
+        }
+
+        Kind::Compensate=>{
+            let task=get(map,ev.task_id)?;
+            if task.state!=State::Done{
+                return  Err(bad(format!("task {} is {:?}, cannot compensate",ev.task_id,task.state)));
+            }
+            match &task.owner{
+                Some(o) if o !=&ev.by=> {
+                    task.state=State::Compensating;
+                    task.active_fencing_token=Some(ev.seq);
+                    Ok(())
+                }
+                _=>Err(bad(format!("task {} cannot be compensated by owner or unowned",ev.task_id))),
             }
         }
 
@@ -105,4 +124,43 @@ fn get<'a>(map: &'a mut BTreeMap<u64, Task>, id: u64) -> Result<&'a mut Task, Po
 
 fn bad(reason: String) -> Poison {
     Poison { reason }
+}
+
+#[cfg(test)]
+mod tests{
+
+    fn done_task()->BTreeMap<u64,Task>{
+        let mut map=BTreeMap::new();
+        apply(&mut map, &Event::new(1, Kind::TaskAdded, 1, "sys".into())).unwrap();
+        apply(&mut map, &Event::new(2, Kind::Claimed,  1, "Coffee".into())).unwrap();
+        apply(&mut map, &Event::new(3, Kind::Working,  1, "Coffee".into()).with_fencing(Some(2))).unwrap();
+        apply(&mut map, &Event::new(4, Kind::Review,   1, "Coffee".into()).with_fencing(Some(2))).unwrap();
+        apply(&mut map, &Event::new(5, Kind::Approve,  1, "Cola".into()).with_commit_sha("deadbeef".into())).unwrap();
+        map
+    }
+use super::*;
+
+    #[test]
+    fn saga_done_to_rolled_back(){
+        let mut map=done_task();
+        assert_eq!(map[&1].state,State::Done);
+        apply(&mut map, &Event::new(6, Kind::Compensate, 1, "Tea".into())).unwrap();
+        assert_eq!(map[&1].state,State::Compensating);
+        apply(&mut map, &Event::new(7, Kind::RolledBack, 1, "Coffee".into()).with_fencing(Some(6))).unwrap();
+        assert_eq!(map[&1].state,State::RolledBack);
+    }
+    #[test]
+    fn saga_owner_cannot_compensate(){
+        let mut map=done_task();
+        assert_eq!(map[&1].state,State::Done);
+        let r =apply(&mut map, &Event::new(6, Kind::Compensate, 1, "Coffee".into()));
+        assert!(r.is_err());
+        assert_eq!(map[&1].state,State::Done);
+    }
+    #[test]
+    fn approve_stores_commit_sha(){
+        let map=done_task();
+        assert_eq!(map[&1].state,State::Done);
+        assert_eq!(map[&1].commit_sha.as_deref(),Some("deadbeef"));
+    }
 }

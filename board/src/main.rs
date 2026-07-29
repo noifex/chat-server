@@ -4,7 +4,7 @@ use std::path::PathBuf;
 mod events;
 mod wal;
 mod reducer;
-
+mod git;
 use events::{Event, Kind, Task};
 use wal::{AppendOutcome, Recover, Wal};
 
@@ -90,6 +90,15 @@ fn mutate(wal: &mut Wal, kind: Kind, args: &[String]) -> i32 {
             return 1;
         }
 
+        // approve ok -> done -> git commit-> sha 
+        if matches!(kind,Kind::Approve){
+            let ws =env::var("BOARD_WORKSPACE").unwrap_or_else(|_| "workspace".into());
+            match git::commit(std::path::Path::new(&ws), id) {
+                Ok(sha)=>{ev=ev.with_commit_sha(sha);}
+                Err(e)=>{eprintln!("git commit failed: {e}"); return 75;}
+            }
+        }
+
         match w.append(&ev) {
             AppendOutcome::Committed(s) => {
                 if is_grant {
@@ -138,3 +147,5 @@ fn with_lock(wal: &mut Wal, f: impl FnOnce(&mut wal::Locked) -> i32) -> i32 {
         74
     })
 }
+
+
