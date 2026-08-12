@@ -64,11 +64,19 @@ pub fn commit(workspace:&Path, task_id:u64)->io::Result<String>{
       }else {
           Err(io::Error::other(format!("git revert <sha> failed:{}",text)))
       }
+      //普通の再実行はここまで来れない。cmd_revert probeがstateで弾く。
+      //(RolledBack-> RolledBackは不正遷移 -> exit code 1)can't roll: task 1 is RolledBack, cannot -> RolledBack
+      //1
+      //ここにこるのはWAL appendが失敗か中断した窓だけ。(テスト後の補註)
       // えーとrevert済みの失敗はErrを返すだけです
       // 例：git revert ok -> wal appendの前に失敗 ->再実行
       // workspaceは巻き戻り済みけどboardはCompensatingのまま。
       //exit code 75になるが、それは後で再試行　の意味。でも何度やってもなおらないのでここの75は信用できない。
       // この処理についてはstep 13c: dual write復旧の実装が担当するが、またのちほど。
+
+      //else if text.contains("CONFLICT")
+      //なぜ抜けられるかというと
+      //gitが返したものにCONFLICTが含まれてないからerrになった。
   }
 
 
