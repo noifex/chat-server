@@ -3,7 +3,7 @@ use std::process::Command;
 use std::io;
 pub enum RevertOutcome {
     Reverted,
-    Conflict
+    Conflict,
 }
 
 
@@ -48,15 +48,27 @@ pub fn commit(workspace:&Path, task_id:u64)->io::Result<String>{
           .current_dir(workspace)
           .args(["revert", "--no-edit", sha])
           .output()?;
+    let text=format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
       if out.status.success() {
           Ok(RevertOutcome::Reverted)
-      } else {
-          let _ = Command::new("git")
+      } else if text.contains("CONFLICT"){
+        let _ = Command::new("git")
               .current_dir(workspace)
               .args(["revert", "--abort"])
               .output();
           Ok(RevertOutcome::Conflict)
+      }else {
+          Err(io::Error::other(format!("git revert <sha> failed:{}",text)))
       }
+      // えーとrevert済みの失敗はErrを返すだけです
+      // 例：git revert ok -> wal appendの前に失敗 ->再実行
+      // workspaceは巻き戻り済みけどboardはCompensatingのまま。
+      //exit code 75になるが、それは後で再試行　の意味。でも何度やってもなおらないのでここの75は信用できない。
+      // この処理についてはstep 13c: dual write復旧の実装が担当するが、またのちほど。
   }
 
 
