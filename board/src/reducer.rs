@@ -16,6 +16,7 @@ pub fn apply(map: &mut BTreeMap<u64, Task>, ev: &Event) -> Result<(), Poison> {
                 state: State::Proposed,
                 desc: ev.desc.clone().unwrap_or_default(),
                 owner: None,
+                author:None,
                 active_fencing_token: None,
                 claimed_at: None,
                 commit_sha:None,
@@ -39,7 +40,7 @@ pub fn apply(map: &mut BTreeMap<u64, Task>, ev: &Event) -> Result<(), Poison> {
         // grant: reclaim は作業中の task を横取り。新しい整理券を焼く（旧番号は自動的に無効化）。
         Kind::Reclaimed => {
             let task = get(map, ev.task_id)?;
-            match task.state {
+            match task.state { //自己承認バグを防ぐため、ここではauthorを書かない。
                 State::Claimed | State::Working | State::Review => {
                     task.owner = Some(ev.by.clone());
                     task.active_fencing_token = Some(ev.seq);
@@ -52,7 +53,13 @@ pub fn apply(map: &mut BTreeMap<u64, Task>, ev: &Event) -> Result<(), Poison> {
 
         // transition: state 一致 AND 持ってる整理券が現役と完全一致した時だけ進む。
         Kind::Working => advance(map, ev, State::Claimed, State::Working),
-        Kind::Review  => advance(map, ev, State::Working, State::Review),
+        Kind::Review  => {
+            advance(map, ev, State::Working, State::Review)?;
+            let task=get(map, ev.task_id)?;
+            task.author=Some(ev.by.clone());
+            Ok(())
+
+        },
         Kind::RolledBack=>advance(map, ev, State::Compensating, State::RolledBack),
         Kind::NeedsHuman=> advance(map, ev, State::Compensating, State::NeedsHuman),
 
@@ -62,13 +69,13 @@ pub fn apply(map: &mut BTreeMap<u64, Task>, ev: &Event) -> Result<(), Poison> {
             if task.state != State::Review {
                 return Err(bad(format!("task {} is {:?}, cannot approve", ev.task_id, task.state)));
             }
-            match &task.owner {
-                Some(o) if o != &ev.by => {
+            match &task.author {
+                Some(a) if a != &ev.by => {
                     task.state = State::Done;
                     task.commit_sha=ev.commit_sha.clone();
                     Ok(())
                 }
-                _ => Err(bad(format!("task {} cannot be approved by owner or unowned", ev.task_id))),
+                _ => Err(bad(format!("task {} cannot be approved by author or unowned", ev.task_id))), 
             }
         }
 
@@ -77,13 +84,13 @@ pub fn apply(map: &mut BTreeMap<u64, Task>, ev: &Event) -> Result<(), Poison> {
             if task.state!=State::Done{
                 return  Err(bad(format!("task {} is {:?}, cannot compensate",ev.task_id,task.state)));
             }
-            match &task.owner{
-                Some(o) if o !=&ev.by=> {
+            match &task.author{
+                Some(a) if a !=&ev.by=> {
                     task.state=State::Compensating;
                     task.active_fencing_token=Some(ev.seq);
                     Ok(())
                 }
-                _=>Err(bad(format!("task {} cannot be compensated by owner or unowned",ev.task_id))),
+                _=>Err(bad(format!("task {} cannot be compensated by author or unowned",ev.task_id))),
             }
         }
 
@@ -92,12 +99,12 @@ pub fn apply(map: &mut BTreeMap<u64, Task>, ev: &Event) -> Result<(), Poison> {
             if task.state != State::Review {
                 return Err(bad(format!("task {} is {:?}, cannot request changes", ev.task_id, task.state)));
             }
-            match &task.owner {
-                Some(o) if o != &ev.by => {
+            match &task.author {
+                Some(a) if a != &ev.by => {
                     task.state = State::Working;
                     Ok(())
                 }
-                _ => Err(bad(format!("task {} cannot be sent back by owner or unowned", ev.task_id))),
+                _ => Err(bad(format!("task {} cannot be sent back by author or unowned", ev.task_id))),
             }
         }
     }
@@ -138,6 +145,17 @@ mod tests{
         apply(&mut map, &Event::new(5, Kind::Approve,  1, "Cola".into()).with_commit_sha("deadbeef".into())).unwrap();
         map
     }
+
+    fn reviewed_task()->BTreeMap<u64,Task>{
+        let mut map=BTreeMap::new();
+        apply(&mut map, &Event::new(1, Kind::TaskAdded, 1, "sys".into())).unwrap();
+        apply(&mut map, &Event::new(2, Kind::Claimed, 1, "Coffee".into())).unwrap();
+        apply(&mut map, &Event::new(3, Kind::Working, 1, "Coffee".into()).with_fencing(Some(2))).unwrap();
+        apply(&mut map, &Event::new(4, Kind::Review,   1, "Coffee".into()).with_fencing(Some(2))).unwrap();
+        map
+
+    }
+
 use super::*;
 
     #[test]
@@ -162,5 +180,19 @@ use super::*;
         let map=done_task();
         assert_eq!(map[&1].state,State::Done);
         assert_eq!(map[&1].commit_sha.as_deref(),Some("deadbeef"));
+    }
+    #[test]
+    fn reclaim_cannot_launder_self_approval(){
+        let mut map=reviewed_task();
+        assert_eq!(map[&1].state,State::Review);
+        assert_eq!(map[&1].owner.as_deref(),Some("Coffee"));
+        apply(&mut map, &Event::new(5, Kind::Reclaimed, 1, "Tea".into())).unwrap();
+        assert_eq!(map[&1].state,State::Review);
+        assert_eq!(map[&1].owner.as_deref(),Some("Tea"));
+        let r =apply(&mut map, &Event::new(6, Kind::Approve, 1, "Coffee".into()));
+        assert!(r.is_err());
+        assert_eq!(map[&1].state,State::Review);
+        assert_eq!(map[&1].author.as_deref(),Some("Coffee"));
+        
     }
 }

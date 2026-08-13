@@ -67,7 +67,7 @@ pub fn commit(workspace:&Path, task_id:u64)->io::Result<String>{
       //普通の再実行はここまで来れない。cmd_revert probeがstateで弾く。
       //(RolledBack-> RolledBackは不正遷移 -> exit code 1)can't roll: task 1 is RolledBack, cannot -> RolledBack
       //1
-      //ここにこるのはWAL appendが失敗か中断した窓だけ。(テスト後の補註)
+      //ここにこれるのはWAL appendが失敗か中断した窓だけ。(テスト後の補註)↓テストする前のコメント
       // えーとrevert済みの失敗はErrを返すだけです
       // 例：git revert ok -> wal appendの前に失敗 ->再実行
       // workspaceは巻き戻り済みけどboardはCompensatingのまま。

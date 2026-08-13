@@ -36,6 +36,7 @@ pub struct Task {
     pub state: State,
     pub desc: String,
     pub owner: Option<String>,
+    pub author:Option<String>, // owner!=author. owner排他性、author溜まる
     pub active_fencing_token: Option<u64>,
     pub claimed_at: Option<u64>,
     pub commit_sha: Option<String>,
