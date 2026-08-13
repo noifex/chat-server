@@ -9,8 +9,7 @@ use std::net::SocketAddr;
 use std::net::TcpStream;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
-use std::sync::mpsc::Sender;
-use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::SyncSender;// tx: Sender -> SyncSender because senderなら高速出力する個体がいたらbroadcasterが遅れ、全体の配信が遅延とメモリ消費アップ。 so tx:SyncSender
 use std::sync::mpsc::TrySendError;
 use std::thread::spawn;
 // nc 127.0.0.1 8080
@@ -26,7 +25,7 @@ struct Client{
     out:SyncSender<String>,
     kill:TcpStream,
     }
-struct LeaveGuard{id:u64,tx:Sender<Event>}
+struct LeaveGuard{id:u64,tx:SyncSender<Event>}
 impl Drop for LeaveGuard{
     fn drop(&mut self) {
         let _= self.tx.send(Event::Leave { id: self.id });
@@ -37,7 +36,7 @@ fn main() -> std::io::Result<()>{
     let addr:SocketAddr="127.0.0.1:8080".parse().unwrap();
     let listener=TcpListener::bind(addr).expect("failed");
     println!("listening on {}",addr);
-    let (tx,rx)=mpsc::channel::<Event>();
+    let (tx,rx)=mpsc::sync_channel::<Event>(1024);
     spawn(move || broadcaster(rx));
     for (id,stream) in (0_u64..).zip(listener.incoming()){
         match stream {
@@ -57,7 +56,7 @@ fn main() -> std::io::Result<()>{
     Ok(())
 }
 
-fn handle(id:u64,stream:TcpStream,tx:Sender<Event>)->std::io::Result<()>{
+fn handle(id:u64,stream:TcpStream,tx:SyncSender<Event>)->std::io::Result<()>{
     let mut reader=BufReader::new(stream.try_clone()?);
     let kill=stream.try_clone()?;
     let (out,rx)=mpsc::sync_channel::<String>(256);
@@ -117,11 +116,11 @@ fn broadcaster(rx:Receiver<Event>){
 }
 fn broadcast(clients: &mut Vec<Client>, msg: &str) {
       let line=format!("{msg}\n");
-      clients.retain(|c| match c.out.try_send(line.clone()) {
-          Ok(())=>true,
-          Err(TrySendError::Full(_))=>{let _=c.kill.shutdown(Shutdown::Both); false},
-          Err(TrySendError::Disconnected(_))=>false,
-      });
+      for c in clients {
+        if c.out.try_send(line.clone()).is_err(){
+            let _=c.kill.shutdown(Shutdown::Both);
+        }
+      }
   }
 fn read_name(reader: &mut impl BufRead) -> std::io::Result<String> {
       let mut name = String::new();
