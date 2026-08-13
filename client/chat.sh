@@ -133,8 +133,8 @@ status() {
   fi
 }
 
-say()   { ( cd "$CLIENTS/$1" && bash "$ROOT/say.sh" say "$2" ); }  # ./chat.sh say Coffee "hi"（JSON envelope）
-human() { "$PY" "$ROOT/human.py" "${2:-user1}"; }                  # ./chat.sh human [name]
+say()   { ( cd "$CLIENTS/$1" && bash "$ROOT/say.sh" say "${1:-user1}" ); }  # username works now
+human() { "$PY" "$ROOT/human.py" "$1"; }                  # ./chat.sh human [name]
 watch() { tail -f "$CLIENTS/$1/$1.inbox"; }                        # ./chat.sh watch Coffee
 watchall() { tail -f "$RUNTIME/chat.log"; }
 case "$1" in
