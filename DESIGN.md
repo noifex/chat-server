@@ -21,7 +21,7 @@ chat server は JSON 行を全 peer に中継するだけで、task も persona 
 
 ## 独立レビューを規律でなく機構で強制する
 
-task を作った本人（owner）は自分の成果を承認できない。board が `approve`/`changes` に対し **`by ≠ owner` を要求し、本人の自己承認を機械的に弾く**。「割り込むな」を persona へのお願いで縛るのではなく、状態機械で不可能にする＝**機構が規律を代替する**。GitHub の「author は自分の PR を approve できない」と同じ発想。
+task を作った本人（owner）(現状：判定してるのはauthor)は自分の成果を承認できない。board が `approve`/`changes` に対し **`by ≠ author` を要求し、本人の自己承認を機械的に弾く**。「割り込むな」を persona へのお願いで縛るのではなく、状態機械で不可能にする＝**機構が規律を代替する**。GitHub の「author は自分の PR を approve できない」と同じ発想。
 
 ## crash recovery は範囲を明示して引く
 

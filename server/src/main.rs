@@ -14,7 +14,7 @@ use std::sync::mpsc::TrySendError;
 use std::thread::spawn;
 // nc 127.0.0.1 8080
 enum Event{
-    Join {id:u64,name:String , out:SyncSender<String>,kill:TcpStream}, // this stream is for write_stream ==broadcaster
+    Join {id:u64,name:String , out:SyncSender<String>,kill:TcpStream}, // this stream-> out is for write_stream ==broadcaster
     Move {id:u64, text:String},
     Leave {id:u64},
 }
