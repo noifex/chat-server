@@ -195,4 +195,19 @@ use super::*;
         assert_eq!(map[&1].author.as_deref(),Some("Coffee"));
         
     }
+    #[test]
+    //本来はCoffee(本来書いた人)を弾くべきが、author はOption<String>ので1一人しか保存できないので、reclaim で書き手が変わっても追跡できない
+    fn reclaim_before_review_lets_writer_approve(){
+        let mut map=BTreeMap::new();
+        apply(&mut map, &Event::new(1, Kind::TaskAdded, 1, "sys".into())).unwrap();
+        apply(&mut map, &Event::new(2, Kind::Claimed,  1, "Coffee".into())).unwrap();
+        apply(&mut map, &Event::new(3, Kind::Working,  1, "Coffee".into()).with_fencing(Some(2))).unwrap();
+        apply(&mut map, &Event::new(4, Kind::Reclaimed, 1, "Tea".into())).unwrap();
+        assert_eq!(map[&1].author,None);
+        apply(&mut map, &Event::new(5, Kind::Review,   1, "Tea".into()).with_fencing(Some(4))).unwrap();
+        let r=apply(&mut map, &Event::new(6, Kind::Approve, 1, "Coffee".into()));
+        assert!(r.is_ok());
+        assert_eq!(map[&1].author.as_deref(),Some("Tea"));
+        assert_eq!(map[&1].state,State::Done);
+    }
 }
