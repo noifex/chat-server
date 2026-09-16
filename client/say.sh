@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # say.sh <type> "<text>" [--reply N] [--task N] [--confidence C]
 #
-# JSON行を1本組んで <CHAT_FROM>.outbox に書く（daemon が sendall で server へ）。
+# JSON行を1本組んで <CHAT_FROM>.outbox FIFO に書く（daemon が sendall で server へ）。
+# 書き込み成功後、tick.sh が pending にした範囲だけ cursor を確定する。
 # JSON の組立・エスケープは protocol.build_line に丸投げ＝bash は引数を渡す皮だけ。
 # 実行: persona dir（clients/<Name>）から
 #     bash ../../say.sh say  "本文 @Tea"
@@ -55,4 +56,9 @@ print(protocol.build_line(os.environ["CHAT_FROM"], os.environ["CHAT_MODEL"],
                           domain=sys.argv[8] or None))
 ' "$type" "$text" "$reply" "$task" "$conf" "$cmethod" "$cscale" "$domain")"
 
-printf '%s\n' "$line" > "$CHAT_FROM.outbox"
+python3 "$here/fifo_io.py" send "$CHAT_FROM.outbox" "$line"
+
+pending="$CHAT_FROM.cursor.pending"
+if [ -f "$pending" ]; then
+  mv "$pending" "$CHAT_FROM.cursor"
+fi

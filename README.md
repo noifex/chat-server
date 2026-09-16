@@ -1,6 +1,6 @@
 # chat-server
 
-Rust の `std::net` だけで書いた TCP chat server の上に、**複数の LLM セッション（Claude）を対等な peer として喋らせ、共有タスクボードで協調させて実際のコードを書かせる**マルチエージェント基盤。The Book Ch16（並行）の素振りとして始まり、生 TCP → JSON 行プロトコル → 自律 agent 協調 → イベントソーシングな task board（WAL・fencing・独立レビュー）まで、既製フレームワークを使わず、プリミティブから拡張したもの。
+Rust の `std::net` だけで書いた TCP chat server の上に、**複数の LLM セッション（Claude + Codex）を対等な peer として喋らせ、共有タスクボードで協調させて実際のコードを書かせる**マルチエージェント基盤。The Book Ch16（並行）の素振りとして始まり、生 TCP → JSON 行プロトコル → 自律 agent 協調 → イベントソーシングな task board（WAL・fencing・独立レビュー）まで、既製フレームワークを使わず、プリミティブから拡張したもの。
 
 > ⚠️ **学習用プロジェクト**。production 用途ではない。未実装・未接続の部分あり（下記「Status」「Known issues」）。
 
@@ -10,8 +10,8 @@ Claude Code（Anthropic）を主コーディング、OpenAI codex を独立レ�
 
 ## 目的
 
-- **並行/分散システムの硬いコアをframeworkに頼らず再実装して学ぶ**：event sourcing・WAL + crash recovery・fencing token・独立レビューを、既製ライブラリに頼らずプリミティブから組む（saga／補償トランザクションは**設計のみ・未実装**、Known issues 参照）
-- **多エージェント協調の実験場**：同質モデルの多数決は consistency 機構にすぎず精度に効かない。反証になるのは**異種モデル**（Claude ↔ OpenAI）だけ、という仮説の検証基盤（異種 peer 統合自体は**未完**）
+- **並行/分散システムの硬いコアをframeworkに頼らず再実装して学ぶ**：event sourcing・WAL + crash recovery・fencing token・独立レビュー・Git補償workflowをプリミティブから組む（Git/WAL dual-write 復旧は未実装、Known issues 参照）
+- **多エージェント協調の実験場**：同質モデルの多数決は独立性を生みにくく、異種モデル（Claude ↔ OpenAI）が有力な反証leverになる、という仮説の検証基盤。Codex は `AUDIT` role の live peer として参加する
 - **「会話する AI」→「タスクを実行する agent」**：persona は雑談でなく、board 上の task を claim し、`workspace/` に実コードを書き、互いにコードレビューして done まで回す
 
 ## 3つの部品と関係
@@ -20,7 +20,7 @@ Claude Code（Anthropic）を主コーディング、OpenAI codex を独立レ�
                  ┌─────────────────────────────────────────────┐
                  │  client/  (Python + shell)                  │
                  │                                             │
-   persona ⇄ ⇄ ⇄ │  Coffee / Cola / Tea  (Claude, sonnet)      │
+   persona ⇄ ⇄ ⇄ │  Coffee / Cola / Tea (Claude) + Codex       │
    (Claude Code   │  orchestrator.py  = 話者選択 (turn)          │
     セッション)   │  say.sh / tick.sh = chat 送受信の薄いラッパ  │
                  │  board.sh         = board CLI の薄いラッパ   │
@@ -37,13 +37,11 @@ Claude Code（Anthropic）を主コーディング、OpenAI codex を独立レ�
               └────────────────────┘    └────────────────────────┘
 ```
 
-（Codex＝OpenAI の異種 peer は `clients/Codex/` に**実験スクリプトのみ**。chat.sh / orchestrator には未登録＝現状 chat には参加しない。Known issues 参照）
-
 | dir | 言語 | 役割 | 原則 |
 |---|---|---|---|
 | **server/** | Rust | 全 peer に JSON 行を同報する **dumb pipe（土管）**。`thread per connection` + `mpsc` 集約、履歴は 30 行 ring buffer。相手が誰かも task も知らない | 運搬に徹する＝中央ゲートキーパーにしない |
-| **board/** | Rust | task の**単一真実**。WAL を真実とし状態は replay で再生（event sourcing）。`proposed→claimed→working→review→done` ＋ fencing token ＋**独立レビュー**（`approve`/`changes` は owner 以外のみ） | 単独 writer・機構が規律を代替する |
-| **client/** | Python + shell | persona daemon（Claude Code セッション）＋ orchestrator（話者選択）＋ 薄いラッパ群。persona は chat で会話し、board で task を回し、`workspace/` にコードを書く | persona に精度を期待しない。効くのは**異種モデル** |
+| **board/** | Rust | task の**単一真実**。WAL を真実とし状態は replay で再生（event sourcing）。fencing token ＋独立レビュー＋Git補償workflow | 複数CLI writerを `flock` で直列化し、reducerが1件ずつ受理する |
+| **client/** | Python + shell | persona daemon（Claude Code セッション）＋ orchestrator（話者選択）＋ 薄いラッパ群。persona は chat で会話し、board で task を回し、`workspace/` にコードを書く | persona だけに精度を期待せず、異種モデルを反証leverとして検証する |
 
 server は board を知らない（土管のまま）。board は誰が呼ぼうと「状態」しか見ない。**2つの独立した真実（chat の運搬・task の順序）を persona が繋ぐ。**
 
@@ -56,7 +54,7 @@ persona は自分の turn（`orchestrator` が `client/clients/turn` で指定�
 3. **差し戻し対応**：自分の task が `working`（差し戻された）なら直して `review` 再要求
 4. **task 生成**：やるべき仕事が board に無ければ `board.sh add` で自分で task 化（依頼を寝かせない）
 
-owner と reviewer は別人になる（fencing で強制）ので、**独立したレビュー判定**になる。ただし board の WAL に残るのは `approve`/`changes` の**判定イベント（task_id + 誰が）だけ**で、critique の本文は chat 側に出る（board には保存されない）。
+通常経路では board が `by != author` を検査し、authorの自己承認を禁止する。これはfencingとは別の認可。ただしcontributor履歴は保持しないため、reclaim-before-review後の旧contributor承認には既知の穴がある。WAL に残るのは `approve`/`changes` の判定イベントだけで、critique 本文は chat 側に出る。
 
 ## Protocol
 
@@ -66,11 +64,11 @@ owner と reviewer は別人になる（fencing で強制）ので、**独立し
 {"from":"Cola","model":"claude-sonnet-5","type":"say","reply_to":17,"task_id":2,"confidence":null,"text":"..."}
 ```
 
-server は無改造（整形して撒く `name: text` のまま）。受信側が封筒を剥がす（transport 分離 → `json.loads`）。非 JSON 行は `{type:"say"}` に fallback＝人間の平文 `nc` も後方互換。parse は `protocol.py` に単一ソース化。
+server は無改造（整形して撒く `name: text` のまま）。受信側が封筒を剥がす（transport 分離 → `json.loads`）。非 JSON 行は `{type:"say"}` に fallback＝人間の平文 `nc` も後方互換。parse は `protocol.py` に単一ソース化。payload 内の `from` より connection-associated な transport prefix を優先するが、接続時の名前自体を認証する機構ではない。
 
 ## セットアップと起動
 
-前提: Rust toolchain（`cargo`）、Python 3、`claude`（Claude Code CLI）、`tmux`（任意・1画面運用時）。
+前提: Rust toolchain（`cargo`）、Python 3、`claude`（Claude Code CLI）、`codex`（Codex CLI）、`tmux`（任意・1画面運用時）。
 
 ```sh
 # 1. Rust をビルド
@@ -91,6 +89,7 @@ cd client
 cd clients/Coffee && claude   # → プロンプトで  /loop 10s
 cd clients/Cola   && claude   # → /loop 10s
 cd clients/Tea    && claude   # → /loop 10s
+cd clients/Codex  && bash loop.sh
 
 # 人間として参加
 nc 127.0.0.1 8080        # 平文で喋る（1行目=名前）
@@ -100,7 +99,7 @@ python3 human.py         # peer として参加
 ./chat.sh stop
 ```
 
-> ⚠️ `./chat.sh start` が起動するのは **daemon と orchestrator まで**。persona の思考ループ（`/loop 10s`）は各 `claude` セッションで**手で打つ**必要がある。
+> ⚠️ `./chat.sh start` が起動するのは **daemon と orchestrator まで**。Claude の `/loop 10s` と Codex の `bash loop.sh` は別terminalで起動する。`./chat.sh tmux` は4 peerのloopもまとめて起動する。
 
 ### 権限モデル
 
@@ -117,23 +116,27 @@ persona は `client/clients/<Name>/.claude/settings.local.json` で権限を持�
 - **参加ループ（board 手順・鉄則）は `clients/PARTICIPATION.md` に一元化**。各 persona の `CLAUDE.md` は `@../PARTICIPATION.md` で取り込むので、書くのは**人格 + 役割だけ**（ループを変えるのは1ファイルで済む）。
 - **追加手順**：`clients/PERSONA.template.md` を `clients/<Name>/CLAUDE.md` にコピー → 人格/役割を埋める → `./setup.sh` で権限生成 → `cd clients/<Name> && claude` で参加。
 - ⚠️ **`@../PARTICIPATION.md` は Claude Code の CLAUDE.md import 機能に依存**。これが効かないと persona は board 手順・`/loop` を知らず**ただの雑談 peer に退化**する。起動直後に「persona が board を触るか」で効いてるか確認すること。効かない環境では、`PARTICIPATION.md` の中身を各 `CLAUDE.md` に直接貼る fallback を使う。
-- **Codex**（OpenAI）は現状 chat に**未接続**（`clients/Codex/` は実験スクリプトのみ）。Known issues 参照。
+- **Codex**（OpenAI）は `AUDIT` role の異種 peer。各turnをfresh/ephemeralなread-only sessionで処理し、構造化応答をtrusted wrapperが検査してbusへ送る。
 
 ## Status（動くもの）
 
-- chat bus：echo → broadcast → mpsc 集約 → Python client → Claude 複数体協調 → orchestrator 話者選択 → 自動 loop → history replay → reactive routing → event-driven wake（FIFO）→ JSON 行 protocol ＋ 人間 peer 化 → 権限基盤
+- chat bus：echo → broadcast → mpsc 集約 → Python client → Claude/Codex協調 → orchestrator 話者選択（`AUDIT`含む）→ 自動 loop → history replay → reactive routing → event-driven wake（FIFO）→ JSON 行 protocol ＋ 人間 peer 化 → 権限基盤
 - task board：`proposed→claimed→working→review→done`、flock 排他、torn-tail recover、fencing token（横取り無効化）、seq 連続チェック、**独立レビュー**（approve/changes）
+- compensation workflow：approve でGit commit、revert要求で `compensating→rolled_back` / `needs_human`（crash-safe dual-write復旧は未）
 - agent 化：作業＝`workspace/` にコード成果物、レビュー＝コードを読む、task の自己生成（intake）
 
 ## Known issues
 
 - 🔴 **長時間稼働で token/context が劣化**：persona の `*.inbox` が無制限追記、`tick.sh` が未読を全量投入。compaction / token budget / max-round が未実装。長時間自律運用では context 溢れ・コスト爆発に落ちる
-- 🟡 **異種 peer（Codex）は未接続**：`clients/Codex/` に実験スクリプトはあるが、`chat.sh` の起動対象・`orchestrator` の persona 集合いずれにも登録されておらず、`@Codex` も宛先として認識されない。現状は chat に参加しない
+- 🟡 **client配送はend-to-end ackではない**：`tick` はpending cursorを作り、`say`がdaemon FIFOへ書けた時だけ確定するため送信前crashでは再読できる。一方、FIFO handoff後かつTCP送信前のdaemon crashでは消失し得て、ack直前crashでは重複し得る。seq/ack/dedupは未実装
+- 🟡 **Codexはfresh sessionごとに再構成**：各turnで未読全量と直近80行を渡す。長期の論理session継続はせず、reasoning effortは既定`medium`、1turnは既定180秒でtimeoutするため、深い文脈の連続性と実行中STOPは限定的
 - 🟡 **`@import` 依存が検証不能**：persona の board 手順は `@../PARTICIPATION.md` 頼み。Claude Code の import が無効/仕様変更/相対解決失敗すると雑談 peer に退化する。起動時の自動検査・fallback は未整備
 - 🟡 **話者選択がまだ debate 固定 FSM**：`orchestrator` は task 状態でなく PROPOSE→CRITIQUE→… の固定サイクル。board 駆動 routing（review 待ちを非 owner に確実へ振る）は未実装
 - 🟡 **客観終端が未実装**：レビューは今のところ「コードを読む」主観。`cargo test`/実行 pass で done とする検証ベース終端は未実装。収束は Tea の宣言頼み
 - 🟡 **identity/auth 無し**：board の `by` は audit 文字列で、名前 spoofing 可能。誰が approve/reclaim 可能かの制限は未実装
-- 🟡 **durability の詰め残り**：mock harness による crash 注入検証（死験）、saga（git 補償）、行 CRC は未実装
+- 🔴 **taskとGit変更の分離なし**：approve時の `git add -A` は共有 `workspace/` 全体をcommitするため、並行taskの変更が同じcommit/revertに混ざり得る
+- 🟡 **reviewer履歴がscalar**：`Task.author` は1人分のみで、reclaim-before-review後に旧contributorがapproveできる
+- 🔴 **Git/WAL dual-write の crash gap**：approve はGit commit後、revertはGit revert後にWALへ追記する。間で落ちた場合のintent/reconciliationは未実装。行CRCも未実装
 - 🟡 **`./chat.sh stop` の kill が広範**：PID file に加えて `chat-server` / `client_daemon.py` / `orchestrator.py` を名前一致で `pkill` する。同名プロセスを走らせている他プロジェクトも巻き込みうる
 
 ## ディレクトリ構成
@@ -158,7 +161,7 @@ chat-server/
     │   ├── PARTICIPATION.md         # 共有エンジン（参加ループ・board手順・鉄則）
     │   ├── PERSONA.template.md      # 新 persona 用テンプレ
     │   ├── settings.example.json    # 権限テンプレ
-    │   ├── Codex/                   # 異種 peer 実験スクリプト（chat 未接続）
+    │   ├── Codex/                   # read-only fresh sessionで動く異種 AUDIT peer
     │   └── <Name>/CLAUDE.md          # persona 固有（人格 + 役割 + @PARTICIPATION.md）
     └── workspace/          # agent 成果物の隔離 git repo（setup.sh が作成・.gitignore 済み）
 ```

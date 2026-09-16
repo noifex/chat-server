@@ -1,19 +1,43 @@
-use serde::{Serialize, Deserialize};
+use crate::error::{BoardError, BoardResult};
+use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SCHEMA_VERSION: u16 = 1;
 
-fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
+fn now_ms() -> BoardResult<u64> {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(BoardError::Time)?;
+    u64::try_from(duration.as_millis()).map_err(|_| BoardError::Exhausted("timestamp"))
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum Kind { TaskAdded, Claimed, Reclaimed, Working, Review, Approve, ChangesRequested, Compensate, RolledBack, NeedsHuman }
+pub enum Kind {
+    TaskAdded,
+    Claimed,
+    Reclaimed,
+    Working,
+    Review,
+    Approve,
+    ChangesRequested,
+    Compensate,
+    RolledBack,
+    NeedsHuman,
+}
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "snake_case")]
-pub enum State { Proposed, Claimed, Working, Review, Done, Compensating, RolledBack, NeedsHuman }
+pub enum State {
+    Proposed,
+    Claimed,
+    Working,
+    Review,
+    Done,
+    Compensating,
+    RolledBack,
+    NeedsHuman,
+}
 
 #[derive(Serialize, Deserialize, PartialEq)]
 pub struct Event {
@@ -30,32 +54,20 @@ pub struct Event {
     pub commit_sha: Option<String>,
 }
 
-#[derive(Serialize, Clone)]
-pub struct Task {
-    pub id: u64,
-    pub state: State,
-    pub desc: String,
-    pub owner: Option<String>,
-    pub author:Option<String>, // owner!=author. owner排他性、author溜まる
-    pub active_fencing_token: Option<u64>,
-    pub claimed_at: Option<u64>,
-    pub commit_sha: Option<String>,
-}
-
 impl Event {
-    pub fn new(seq: u64, kind: Kind, task_id: u64, by: String) -> Self {
-        Event {
+    pub fn new(seq: u64, kind: Kind, task_id: u64, by: String) -> BoardResult<Self> {
+        Ok(Event {
             schema_version: SCHEMA_VERSION,
             seq,
-            ts: now_ms(),
+            ts: now_ms()?,
             kind,
             task_id,
             by,
             fencing_token: None,
             expected_state: None,
             desc: None,
-            commit_sha:None,
-        }
+            commit_sha: None,
+        })
     }
 
     pub fn with_fencing(mut self, token: Option<u64>) -> Self {
@@ -76,4 +88,16 @@ impl Event {
         self.commit_sha = Some(sha);
         self
     }
+}
+
+#[derive(Serialize, Clone)]
+pub struct Task {
+    pub id: u64,
+    pub state: State,
+    pub desc: String,
+    pub owner: Option<String>,
+    pub author: Option<String>, // owner!=author. owner排他性、author溜まる
+    pub active_fencing_token: Option<u64>,
+    pub claimed_at: Option<u64>,
+    pub commit_sha: Option<String>,
 }

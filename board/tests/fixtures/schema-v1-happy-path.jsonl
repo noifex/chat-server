@@ -1,0 +1,5 @@
+{"schema_version":1,"seq":1,"ts":1700000000000,"kind":"task_added","task_id":1,"by":"cli","fencing_token":null,"expected_state":null,"desc":"schema v1 fixture task"}
+{"schema_version":1,"seq":2,"ts":1700000000001,"kind":"claimed","task_id":1,"by":"Coffee","fencing_token":2,"expected_state":"proposed","desc":null}
+{"schema_version":1,"seq":3,"ts":1700000000002,"kind":"working","task_id":1,"by":"Coffee","fencing_token":2,"expected_state":"claimed","desc":null}
+{"schema_version":1,"seq":4,"ts":1700000000003,"kind":"review","task_id":1,"by":"Coffee","fencing_token":2,"expected_state":"working","desc":null}
+{"schema_version":1,"seq":5,"ts":1700000000004,"kind":"approve","task_id":1,"by":"Cola","fencing_token":null,"expected_state":"review","desc":null,"commit_sha":"0123456789abcdef"}

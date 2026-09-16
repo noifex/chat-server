@@ -5,6 +5,11 @@ ev = parse_line(f'Cola: {build_line("Cola","claude-opus-4-8","say",chr(97)+": "+
 assert ev["text"] == 'a: "b"', ev
 assert parse_line("Cola joined\n")["from"] is None
 
+# payload の from より、server が付けた transport identity を優先する
+spoofed = build_line("Coffee", "test", "say", "not Coffee")
+ev = parse_line(f"Tea: {spoofed}")
+assert ev["from"] == "Tea", ev
+
 # 設計デルタ①: 新フィールド round-trip
 line = build_line("Cola", "claude-sonnet-5", "say", "hi", confidence=0.62,
                   confidence_method="self_report", confidence_scale="0-20", domain="rust",

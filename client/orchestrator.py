@@ -1,16 +1,17 @@
 from collections import deque
 from protocol import parse_line, build_line
 import socket,re,os,tempfile
-PERSONAS={"Coffee","Cola","Tea"}
-ROLE={"PROPOSE":"Coffee","CRITIQUE":"Cola","REBUT":"Coffee","SYNTHESIZE":"Tea"}
-NEXT={"PROPOSE":"CRITIQUE","CRITIQUE":"REBUT","REBUT":"SYNTHESIZE","SYNTHESIZE":"CRITIQUE"}
+PERSONAS={"Coffee","Cola","Tea","Codex"}
+ROLE={"PROPOSE":"Coffee","CRITIQUE":"Cola","REBUT":"Coffee","AUDIT":"Codex","SYNTHESIZE":"Tea"}
+NEXT={"PROPOSE":"CRITIQUE","CRITIQUE":"REBUT","REBUT":"AUDIT","AUDIT":"SYNTHESIZE","SYNTHESIZE":"CRITIQUE"}
 TURN=os.path.join(os.path.dirname(__file__),"clients","turn")
 LOG=os.path.join(os.path.dirname(__file__),".runtime","chat.log")
 CLIENTS=os.path.join(os.path.dirname(__file__),"clients")
 queue=deque()
 turns_since_tea=0
+turns_since_codex=0
 
-POLICY_VERSION="sm-queue-v1"   # 現routing方針: 状態機械 + @address queue + Tea cadence
+POLICY_VERSION="sm-queue-audit-v2"   # 状態機械 + @address queue + Tea/Codex cadence
 ROUTE_LOG=os.path.join(os.path.dirname(__file__),".runtime","route.log")
 
 def write_turn(name):
@@ -77,9 +78,16 @@ for raw in s.makefile():
             turns_since_tea+=1
         else:
             turns_since_tea=0
+        if who !="Codex":
+            turns_since_codex+=1
+        else:
+            turns_since_codex=0
         if turns_since_tea>=6 and "Tea" not in queue:
             queue.appendleft("Tea")
             turns_since_tea=0
+        # Queueing is not delivery: reset only after Codex actually speaks.
+        if turns_since_codex>=8 and "Codex" not in queue:
+            queue.appendleft("Codex")
         if queue:
             nxt=queue.popleft(); rationale="queue"
         else:

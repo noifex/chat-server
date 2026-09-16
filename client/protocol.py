@@ -29,7 +29,12 @@ def parse_line(raw:str)->dict:
             ev=None
     if ev is None:
         ev={"from":name,"type":"say","text":payload}
-    ev.setdefault("from", name)
+    # The connection-associated transport prefix is authoritative.  A JSON
+    # payload may carry metadata, but it cannot claim another connection's name.
+    if name is not None:
+        ev["from"] = name
+    else:
+        ev.setdefault("from", None)
     ev.setdefault("model", None)
     ev.setdefault("type", "say")
     ev.setdefault("text", "")
